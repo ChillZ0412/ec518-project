@@ -58,9 +58,11 @@ def get_frame(q, frame, timeout=5.0):
 
 
 def set_destination(agent, ego, location):
-    try:
-        agent.set_destination(location)  # CARLA >= 0.9.12
-    except TypeError:
+    """Plan a route from the ego's current position. Call only after at least one world.tick():
+    in synchronous mode a freshly spawned actor reports location (0, 0, 0) until the first tick."""
+    if hasattr(agent, "done"):
+        agent.set_destination(location)  # CARLA >= 0.9.12: set_destination(end, start=None)
+    else:
         agent.set_destination(ego.get_location(), location, clean=True)  # 0.9.10 / 0.9.11
 
 
@@ -142,7 +144,11 @@ def main():
         os.makedirs(os.path.join(ep_dir, d), exist_ok=True)
 
     try:
-        ego = world.spawn_actor(bp_lib.find("vehicle.lincoln.mkz_2017"), spawns[0])
+        # the blueprint id is "mkz2017" in CARLA 0.9.10 and "mkz_2017" in newer versions
+        ego_ids = [b.id for b in bp_lib.filter("vehicle.lincoln.mkz*")]
+        ego_bp = bp_lib.find(ego_ids[0]) if ego_ids else bp_lib.filter("vehicle.*")[0]
+        ego_bp.set_attribute("role_name", "hero")
+        ego = world.spawn_actor(ego_bp, spawns[0])
         actors.append(ego)
 
         for sp in spawns[1:1 + a.vehicles]:
@@ -171,8 +177,10 @@ def main():
         col.listen(lambda e: collisions.append(e.frame))
         sensors.append(col)
 
+        # one tick so the ego (and everything just spawned) has its real transform
+        world.tick()
         agent = BehaviorAgent(ego, behavior="normal")
-        set_destination(agent, ego, random.choice(spawns).location)
+        set_destination(agent, ego, random.choice(spawns[1:]).location)
 
         rows, idx = [], 0
         for t in range(a.frames):
@@ -180,7 +188,7 @@ def main():
             imgs = {k: get_frame(q, frame) for k, q in queues.items()}
 
             if route_done(agent):
-                set_destination(agent, ego, random.choice(spawns).location)
+                set_destination(agent, ego, random.choice(spawns[1:]).location)
             update_agent(agent, ego)
             command = current_command(agent)
             control = agent.run_step()
