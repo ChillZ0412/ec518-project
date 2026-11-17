@@ -4,8 +4,9 @@ Each episode saves RGB / semantic segmentation / depth from three cameras that s
 one pose, plus speed, navigation command and expert control. The output layout follows
 docs/interface.md.
 
-The expert is CARLA's BehaviorAgent (PythonAPI/carla/agents). Written against the
-CARLA >= 0.9.12 agents API; for 0.9.10/0.9.11 see the notes on set_destination / done below.
+The expert is CARLA's BehaviorAgent (PythonAPI/carla/agents). Works with the 0.9.10 agents
+API (our setup: CARLA 0.9.10.1, Python 3.7) and with 0.9.12+; see set_destination,
+route_done and update_agent for the version differences.
 
 Usage (start CarlaUE4.exe first, in the conda env "carla"):
     python collect_data.py --town Town01 --weather ClearNoon --frames 1200 --seed 0
@@ -70,7 +71,25 @@ def route_done(agent):
     q = getattr(lp, "_waypoints_queue", None)
     if q is None:
         q = getattr(lp, "waypoints_queue", [])
-    return len(q) < 5
+    buf = getattr(lp, "_waypoint_buffer", [])  # 0.9.10 keeps the next few waypoints here
+    return len(q) + len(buf) < 5
+
+
+class _WorldShim(object):
+    """0.9.9-style update_information(world) only needs world.player."""
+    def __init__(self, ego):
+        self.player = ego
+
+
+def update_agent(agent, ego):
+    """CARLA 0.9.10/0.9.11 BehaviorAgent needs update_information() before every run_step();
+    0.9.12+ does it inside run_step() and has no public update_information."""
+    if not hasattr(agent, "update_information"):
+        return
+    try:
+        agent.update_information()
+    except TypeError:
+        agent.update_information(_WorldShim(ego))
 
 
 def current_command(agent):
@@ -108,7 +127,8 @@ def main():
     world.apply_settings(settings)
     tm = client.get_trafficmanager(8000)
     tm.set_synchronous_mode(True)
-    tm.set_random_device_seed(a.seed)
+    if hasattr(tm, "set_random_device_seed"):
+        tm.set_random_device_seed(a.seed)
     world.set_weather(getattr(carla.WeatherParameters, a.weather))
 
     bp_lib = world.get_blueprint_library()
@@ -161,6 +181,7 @@ def main():
 
             if route_done(agent):
                 set_destination(agent, ego, random.choice(spawns).location)
+            update_agent(agent, ego)
             command = current_command(agent)
             control = agent.run_step()
             ego.apply_control(control)
