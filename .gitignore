@@ -1,0 +1,10 @@
+dataset/
+features/
+checkpoints/
+*.pth
+*.pt
+*.npy
+*.npz
+__pycache__/
+.hf_cache/
+results/
