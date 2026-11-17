@@ -66,15 +66,33 @@ def set_destination(agent, ego, location):
         agent.set_destination(ego.get_location(), location, clean=True)  # 0.9.10 / 0.9.11
 
 
+def _queue(agent):
+    lp = agent._local_planner
+    q = getattr(lp, "waypoints_queue", None)  # 0.9.10 / 0.9.11
+    if q is None:
+        q = getattr(lp, "_waypoints_queue", [])
+    return q
+
+
 def route_done(agent):
+    """True when the expert needs more route. 0.9.10's BehaviorAgent looks a few waypoints
+    ahead in the queue every step and crashes once the queue is empty, so extend it early."""
     if hasattr(agent, "done"):
         return agent.done()  # CARLA >= 0.9.12
-    lp = agent._local_planner
-    q = getattr(lp, "_waypoints_queue", None)
-    if q is None:
-        q = getattr(lp, "waypoints_queue", [])
-    buf = getattr(lp, "_waypoint_buffer", [])  # 0.9.10 keeps the next few waypoints here
-    return len(q) + len(buf) < 5
+    return len(_queue(agent)) < 20
+
+
+def extend_route(agent, ego, location):
+    """Append a route to `location`, continuing from the end of the current one."""
+    if hasattr(agent, "done"):
+        agent.set_destination(location)  # CARLA >= 0.9.12
+        return
+    q = _queue(agent)
+    if len(q) > 0:
+        start = q[-1][0].transform.location
+        agent.set_destination(start, location, clean=False)  # 0.9.10: appends to the queue
+    else:
+        agent.set_destination(ego.get_location(), location, clean=True)
 
 
 class _WorldShim(object):
@@ -188,10 +206,17 @@ def main():
             imgs = {k: get_frame(q, frame) for k, q in queues.items()}
 
             if route_done(agent):
+                extend_route(agent, ego, random.choice(spawns[1:]).location)
+            try:
+                update_agent(agent, ego)
+                command = current_command(agent)
+                control = agent.run_step()
+            except (AttributeError, IndexError) as e:
+                # expert lost its route: replan from where the car is, brake, don't save this tick
+                print(f"expert error at tick {t} ({e}); replanning")
                 set_destination(agent, ego, random.choice(spawns[1:]).location)
-            update_agent(agent, ego)
-            command = current_command(agent)
-            control = agent.run_step()
+                ego.apply_control(carla.VehicleControl(brake=1.0))
+                continue
             ego.apply_control(control)
 
             if t < a.warmup or t % a.save_every != 0:
