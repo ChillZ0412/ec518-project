@@ -3,7 +3,12 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
-from torchvision.models import ResNet18_Weights, resnet18
+from torchvision.models import resnet18
+
+try:  # torchvision >= 0.13
+    from torchvision.models import ResNet18_Weights
+except ImportError:  # older torchvision on the Python 3.7 CARLA env
+    ResNet18_Weights = None
 
 from policy.vfm import IMAGE_SIZE, preprocess_rgb
 
@@ -14,12 +19,14 @@ def canonical_commands(commands):
     commands = commands.long()
     if torch.any((commands < 1) | (commands > 6)):
         raise ValueError("Commands must be integers in 1..6")
-    return torch.where(commands >= 5, 4, commands)
+    return torch.where(commands >= 5, torch.full_like(commands, 4), commands)
 
 
 def resnet_encoder(channels, pretrained):
-    weights = ResNet18_Weights.IMAGENET1K_V1 if pretrained else None
-    encoder = resnet18(weights=weights)
+    if ResNet18_Weights is not None:
+        encoder = resnet18(weights=ResNet18_Weights.IMAGENET1K_V1 if pretrained else None)
+    else:
+        encoder = resnet18(pretrained=pretrained)
     if channels != 3:
         original = encoder.conv1
         encoder.conv1 = nn.Conv2d(channels, 64, 7, stride=2, padding=3, bias=False)

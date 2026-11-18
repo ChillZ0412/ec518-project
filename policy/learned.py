@@ -1,5 +1,7 @@
 """Online policy using the same preprocessing as offline feature extraction."""
 
+import pickle
+
 import torch
 
 from policy.data import gt_inputs
@@ -11,7 +13,12 @@ from policy.vfm import FrozenVFM
 class LearnedPolicy(Policy):
     @classmethod
     def load(cls, ckpt_path, device="cuda"):
-        checkpoint = torch.load(ckpt_path, map_location="cpu", weights_only=True)
+        try:
+            checkpoint = torch.load(ckpt_path, map_location="cpu", weights_only=True)
+        except (TypeError, pickle.UnpicklingError, RuntimeError):
+            # torch < 1.13 has no weights_only, and torch 1.13's safe loader rejects the float
+            # values in "config" (pickle BINFLOAT). Our own checkpoints are trusted, so load them normally.
+            checkpoint = torch.load(ckpt_path, map_location="cpu")
         policy = cls()
         policy.device = torch.device(device)
         policy.variant = checkpoint["variant"]
