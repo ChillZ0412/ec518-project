@@ -27,6 +27,16 @@ from policy.policy_interface import load_policy  # noqa: E402
 W, H, FOV = 320, 240, 90
 CAM_X, CAM_Z = 1.5, 2.4
 
+# Post-processing applied identically to every variant (set PROJECT_POSTPROC=0 to disable):
+#  - brake is binarized at 0.5 and throttle is zeroed while braking (same as the HW2 il_agent)
+#  - anti-stall "creep": after STUCK_STEPS ticks below 0.1 m/s, force CREEP_THROTTLE for
+#    CREEP_STEPS ticks. Behavior cloning learns "speed 0 -> brake" because the expert mostly
+#    stands still at red lights (inertia problem); creep events are counted in PROJECT_LOG.
+POSTPROC = os.environ.get("PROJECT_POSTPROC", "1") != "0"
+STUCK_STEPS = int(os.environ.get("PROJECT_STUCK_STEPS", "100"))  # 5 s at 20 Hz
+CREEP_STEPS, CREEP_THROTTLE = 20, 0.5
+DEBUG = os.environ.get("PROJECT_DEBUG", "0") == "1"
+
 
 def get_entry_point():
     return "ProjectAgent"
@@ -43,6 +53,8 @@ class ProjectAgent(autonomous_agent.AutonomousAgent):
         self._act_ms, self._step_ms = [], []
         self._t_last = None
         self.step = -1  # the course leaderboard's statistics_manager reads agent.step
+        self._stopped, self._creep, self._n_creep = 0, 0, 0
+        self._raw_brake_stopped = []
 
     def sensors(self):
         cam = {"x": CAM_X, "y": 0.0, "z": CAM_Z, "roll": 0.0, "pitch": 0.0, "yaw": 0.0,
@@ -95,6 +107,24 @@ class ProjectAgent(autonomous_agent.AutonomousAgent):
         steer, throttle, brake = self.policy.act(obs)
         self._act_ms.append((time.perf_counter() - ta) * 1000.0)
 
+        speed = obs["speed"]
+        if speed < 0.1:
+            self._raw_brake_stopped.append(float(brake))
+        if POSTPROC:
+            brake = 1.0 if brake > 0.5 else 0.0
+            if brake > 0:
+                throttle = 0.0
+            self._stopped = self._stopped + 1 if speed < 0.1 else 0
+            if self._creep > 0:
+                throttle, brake = CREEP_THROTTLE, 0.0
+                self._creep -= 1
+            elif self._stopped >= STUCK_STEPS:
+                self._creep, self._stopped = CREEP_STEPS, 0
+                self._n_creep += 1
+        if DEBUG and self.step % 20 == 0:
+            print(f"step {self.step} speed {speed:.2f} cmd {obs['command']} "
+                  f"steer {steer:+.3f} throttle {throttle:.2f} brake {brake:.2f}", flush=True)
+
         control = carla.VehicleControl()
         control.steer = float(np.clip(steer, -1.0, 1.0))
         control.throttle = float(np.clip(throttle, 0.0, 1.0))
@@ -108,7 +138,11 @@ class ProjectAgent(autonomous_agent.AutonomousAgent):
             stats = {"steps": len(self._act_ms),
                      "policy_ms_mean": float(np.mean(self._act_ms)),
                      "policy_ms_p95": float(np.percentile(self._act_ms, 95)),
-                     "agent_ms_mean": float(np.mean(self._step_ms))}
+                     "agent_ms_mean": float(np.mean(self._step_ms)),
+                     "postproc": POSTPROC,
+                     "creep_events": self._n_creep,
+                     "raw_brake_mean_when_stopped": (float(np.mean(self._raw_brake_stopped))
+                                                     if self._raw_brake_stopped else None)}
             os.makedirs(os.path.dirname(os.path.abspath(log)), exist_ok=True)
             with open(log, "a") as f:
                 f.write(json.dumps(stats) + "\n")
