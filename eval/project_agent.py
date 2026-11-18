@@ -42,6 +42,7 @@ class ProjectAgent(autonomous_agent.AutonomousAgent):
         self._weather_set = False
         self._act_ms, self._step_ms = [], []
         self._t_last = None
+        self.step = -1  # the course leaderboard's statistics_manager reads agent.step
 
     def sensors(self):
         cam = {"x": CAM_X, "y": 0.0, "z": CAM_Z, "roll": 0.0, "pitch": 0.0, "yaw": 0.0,
@@ -73,6 +74,7 @@ class ProjectAgent(autonomous_agent.AutonomousAgent):
 
     def run_step(self, input_data, timestamp):
         t0 = time.perf_counter()
+        self.step += 1
         if not self._weather_set:
             w = os.environ.get("PROJECT_WEATHER")
             if w:
