@@ -78,6 +78,11 @@ steer, throttle, brake = policy.act(obs)
 - Segmentation: both CARLA tags and Cityscapes trainIds are mapped to 10 shared classes
   (0 other, 1 road, 2 sidewalk, 3 building/pole, 4 vegetation/terrain, 5 sky, 6 vehicle,
   7 person, 8 traffic light, 9 traffic sign). The CARLA table depends on carla_version (>= 0.9.14 or not).
+- For CARLA 0.9.10.1 pilot comparisons, Cityscapes sky and legacy CARLA sky
+  both map to class 0. The 10-channel layout keeps class 5 reserved.
+- Training excludes the first collision row and every subsequent row. Splits use
+  seeds 0-6 for training and seed 7 for validation.
+- Training loss = 2 * steer MAE + throttle MAE + brake MAE.
 - Commands 5 and 6 (lane changes) are treated as 4 in both training and act().
 
 ## 4. Handoff

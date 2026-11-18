@@ -46,16 +46,12 @@ class DummyPolicy(Policy):
 
 
 def load_policy(path, device="cuda"):
-    """'dummy' -> DummyPolicy; otherwise a checkpoint written by Yuhao's training code.
-
-    TODO (Yuhao): read the variant name stored inside the checkpoint and return the
-    matching Policy subclass, e.g.
-        ckpt = torch.load(path, map_location=device)
-        return VARIANTS[ckpt["variant"]].load(path, device)
-    """
+    """Load dummy, HW1 or a variant-aware learned checkpoint."""
+    path = str(path)
     if path == "dummy":
         return DummyPolicy.load()
     if path.startswith("hw1:"):  # RGB baseline from HW1, e.g. "hw1:D:\\518\\hw1\\model.pth"
         from policy.hw1_policy import HW1Policy
         return HW1Policy.load(path[4:], device)
-    raise NotImplementedError("real policies: implemented by Yuhao in policy/")
+    from policy.learned import LearnedPolicy
+    return LearnedPolicy.load(path, device)
